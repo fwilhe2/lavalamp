@@ -1,0 +1,2 @@
+# lavalamp
+code via chatgpt
