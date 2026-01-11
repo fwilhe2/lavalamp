@@ -22,17 +22,16 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: var(--text);
             user-select: none;
+            touch-action: none; /* Prevents scrolling on mobile while "painting" */
         }
 
-        canvas {
-            display: block;
-        }
+        canvas { display: block; cursor: crosshair; }
 
         #ui {
             position: absolute;
             top: 20px;
             left: 20px;
-            pointer-events: none; /* Let clicks pass through to canvas */
+            pointer-events: none;
         }
 
         .stat-box {
@@ -41,7 +40,6 @@
             border-radius: 15px;
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255,255,255,0.1);
-            margin-bottom: 10px;
         }
 
         #currency {
@@ -58,7 +56,6 @@
             transform: translateX(-50%);
             display: flex;
             gap: 15px;
-            pointer-events: auto;
         }
 
         .upgrade-btn {
@@ -71,6 +68,7 @@
             transition: all 0.2s;
             backdrop-filter: blur(10px);
             text-align: center;
+            min-width: 140px;
         }
 
         .upgrade-btn:hover {
@@ -101,11 +99,11 @@
 
     <div id="upgrades">
         <button class="upgrade-btn" id="upg-click">
-            Brighter Touch
+            Intense Glow
             <span id="cost-click">Cost: 10</span>
         </button>
         <button class="upgrade-btn" id="upg-auto">
-            Auto-Glow
+            Auto-Lamps
             <span id="cost-auto">Cost: 50</span>
         </button>
     </div>
@@ -124,7 +122,12 @@
         let autoValue = 0;
         
         let costs = { click: 10, auto: 50 };
-        let levels = { click: 1, auto: 0 };
+        
+        // Interaction State
+        let isMouseDown = false;
+        let mouseX = 0;
+        let mouseY = 0;
+        let spawnTimer = 0;
 
         const blobs = [];
         const colors = [
@@ -141,32 +144,26 @@
                 this.y = y;
                 this.size = size;
                 this.colorBase = colorBase;
-                this.alpha = 0.6;
-                this.vx = (Math.random() - 0.5) * 1.5;
-                this.vy = (Math.random() - 0.5) * 1.5;
+                this.alpha = 0.5;
+                this.vx = (Math.random() - 0.5) * 1.2;
+                this.vy = (Math.random() - 0.5) * 1.2;
                 this.life = 1.0;
-                this.decay = 0.002 + Math.random() * 0.003;
+                this.decay = 0.003 + Math.random() * 0.004;
             }
 
             update() {
                 this.x += this.vx;
                 this.y += this.vy;
                 this.life -= this.decay;
-
-                // Gentle bounce
                 if (this.x < 0 || this.x > width) this.vx *= -1;
                 if (this.y < 0 || this.y > height) this.vy *= -1;
             }
 
             draw() {
-                const gradient = ctx.createRadialGradient(
-                    this.x, this.y, 0,
-                    this.x, this.y, this.size
-                );
+                const gradient = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size);
                 const a = this.alpha * this.life;
                 gradient.addColorStop(0, this.colorBase + a + ')');
                 gradient.addColorStop(1, this.colorBase + '0)');
-
                 ctx.fillStyle = gradient;
                 ctx.beginPath();
                 ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
@@ -180,39 +177,29 @@
         }
 
         function createBlob(x, y, isAuto = false) {
-            const size = 40 + Math.random() * 60;
+            const size = 30 + Math.random() * 70;
             const color = colors[Math.floor(Math.random() * colors.length)];
             blobs.push(new Blob(x, y, size, color));
-            
-            if (!isAuto) {
-                lumens += clickValue;
-            }
-        }
-
-        // --- Game Logic ---
-
-        function updateGame() {
-            lumens += autoValue / 60;
-            currencyEl.innerText = `${Math.floor(lumens)} Lumens`;
-            lpsEl.innerText = `${autoValue.toFixed(1)} per sec`;
-
-            // Auto-spawn blobs occasionally
-            if (autoValue > 0 && Math.random() < (0.02 + (autoValue * 0.001))) {
-                createBlob(Math.random() * width, Math.random() * height, true);
-            }
-
-            // Button states
-            document.getElementById('upg-click').disabled = lumens < costs.click;
-            document.getElementById('upg-auto').disabled = lumens < costs.auto;
+            if (!isAuto) lumens += clickValue;
         }
 
         function animate() {
-            // Dark trail effect instead of clearRect for "motion blur"
-            ctx.fillStyle = 'rgba(10, 10, 12, 0.15)';
+            // Background trail
+            ctx.fillStyle = 'rgba(10, 10, 12, 0.12)';
             ctx.fillRect(0, 0, width, height);
 
             ctx.globalCompositeOperation = 'lighter';
 
+            // Handle "Hold to Glow" logic
+            if (isMouseDown) {
+                spawnTimer++;
+                // Spawn a blob every 5 frames while held
+                if (spawnTimer % 5 === 0) {
+                    createBlob(mouseX, mouseY);
+                }
+            }
+
+            // Update/Draw Blobs
             for (let i = blobs.length - 1; i >= 0; i--) {
                 blobs[i].update();
                 blobs[i].draw();
@@ -221,39 +208,71 @@
 
             ctx.globalCompositeOperation = 'source-over';
             
-            updateGame();
+            // Idle logic
+            lumens += autoValue / 60;
+            if (autoValue > 0 && Math.random() < 0.03) {
+                createBlob(Math.random() * width, Math.random() * height, true);
+            }
+
+            // Update UI
+            currencyEl.innerText = `${Math.floor(lumens)} Lumens`;
+            lpsEl.innerText = `${autoValue.toFixed(1)} per sec`;
+            document.getElementById('upg-click').disabled = lumens < costs.click;
+            document.getElementById('upg-auto').disabled = lumens < costs.auto;
+
             requestAnimationFrame(animate);
         }
 
-        // --- Interaction ---
-
-        canvas.addEventListener('mousedown', (e) => {
-            createBlob(e.clientX, e.clientY);
+        // --- Event Listeners ---
+        
+        window.addEventListener('mousedown', (e) => { 
+            isMouseDown = true; 
+            mouseX = e.clientX; 
+            mouseY = e.clientY;
+            createBlob(mouseX, mouseY); // Initial click blob
         });
 
-        document.getElementById('upg-click').addEventListener('click', () => {
+        window.addEventListener('mouseup', () => { isMouseDown = false; });
+        
+        window.addEventListener('mousemove', (e) => {
+            mouseX = e.clientX;
+            mouseY = e.clientY;
+        });
+
+        // Touch support
+        window.addEventListener('touchstart', (e) => {
+            isMouseDown = true;
+            mouseX = e.touches[0].clientX;
+            mouseY = e.touches[0].clientY;
+            createBlob(mouseX, mouseY);
+        });
+        window.addEventListener('touchend', () => { isMouseDown = false; });
+        window.addEventListener('touchmove', (e) => {
+            mouseX = e.touches[0].clientX;
+            mouseY = e.touches[0].clientY;
+        });
+
+        document.getElementById('upg-click').addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent spawning a blob when clicking a button
             if (lumens >= costs.click) {
                 lumens -= costs.click;
-                clickValue += 1;
-                levels.click++;
+                clickValue += 0.5;
                 costs.click = Math.floor(costs.click * 1.5);
                 document.getElementById('cost-click').innerText = `Cost: ${costs.click}`;
             }
         });
 
-        document.getElementById('upg-auto').addEventListener('click', () => {
+        document.getElementById('upg-auto').addEventListener('click', (e) => {
+            e.stopPropagation();
             if (lumens >= costs.auto) {
                 lumens -= costs.auto;
-                autoValue += 0.5;
-                levels.auto++;
+                autoValue += 1;
                 costs.auto = Math.floor(costs.auto * 1.6);
                 document.getElementById('cost-auto').innerText = `Cost: ${costs.auto}`;
             }
         });
 
         window.addEventListener('resize', resize);
-
-        // Initial setup
         resize();
         animate();
     </script>
