@@ -1,299 +1,261 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Lava Lamp — Click to add light</title>
-<style>
-  html,body{height:100%;margin:0;background:#050507;overflow:hidden}
-  canvas{display:block;width:100%;height:100%}
-  .ui {
-    position:fixed;left:12px;bottom:12px;color:rgba(255,255,255,0.9);font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;backdrop-filter: blur(6px);padding:8px 10px;border-radius:8px;font-size:13px;border:1px solid rgba(255,255,255,0.04)
-  }
-  /* small debug overlay shown only on failures */
-  #debug {
-    position:fixed;right:12px;top:12px;background:rgba(0,0,0,0.6);color:#f88;padding:8px;border-radius:8px;font-family:monospace;font-size:12px;display:none;z-index:9999
-  }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumen Lamp - Idle</title>
+    <style>
+        :root {
+            --bg-color: #0a0a0c;
+            --panel-bg: rgba(255, 255, 255, 0.05);
+            --accent: #a855f7;
+            --text: #e2e8f0;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--text);
+            user-select: none;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            pointer-events: none; /* Let clicks pass through to canvas */
+        }
+
+        .stat-box {
+            background: var(--panel-bg);
+            padding: 15px 25px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 10px;
+        }
+
+        #currency {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+        }
+
+        #upgrades {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            pointer-events: auto;
+        }
+
+        .upgrade-btn {
+            background: var(--panel-bg);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            backdrop-filter: blur(10px);
+            text-align: center;
+        }
+
+        .upgrade-btn:hover {
+            background: rgba(255,255,255,0.15);
+            border-color: var(--accent);
+        }
+
+        .upgrade-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .upgrade-btn span {
+            display: block;
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+    </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div class="ui">Click anywhere to add more light ✨</div>
-<div id="debug"></div>
-<script>
-// Lava lamp with robust offscreen handling to avoid "drawImage: Passed-in canvas is empty".
-(() => {
-  const canvas = document.getElementById('c');
-  const ctx = canvas.getContext('2d', { alpha: true });
 
-  // Offscreen canvas used as a glowy layer. We'll fall back to drawing directly
-  // to the main canvas if an offscreen 2D context cannot be obtained.
-  const off = document.createElement('canvas');
-  let offCtx = null;
-  let useOffscreen = false;
-  let dpr = Math.max(1, window.devicePixelRatio || 1);
+    <div id="ui">
+        <div class="stat-box">
+            <div id="currency">0 Lumens</div>
+            <div id="lps">0.0 per sec</div>
+        </div>
+    </div>
 
-  function setSize() {
-    dpr = Math.max(1, window.devicePixelRatio || 1);
-    const w = Math.max(1, Math.floor(window.innerWidth * dpr));
-    const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+    <div id="upgrades">
+        <button class="upgrade-btn" id="upg-click">
+            Brighter Touch
+            <span id="cost-click">Cost: 10</span>
+        </button>
+        <button class="upgrade-btn" id="upg-auto">
+            Auto-Glow
+            <span id="cost-auto">Cost: 50</span>
+        </button>
+    </div>
 
-    // assign sizes (never zero)
-    canvas.width = w;
-    canvas.height = h;
-    canvas.style.width = window.innerWidth + 'px';
-    canvas.style.height = window.innerHeight + 'px';
+    <canvas id="canvas"></canvas>
 
-    off.width = w;
-    off.height = h;
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const currencyEl = document.getElementById('currency');
+        const lpsEl = document.getElementById('lps');
 
-    // attempt to get 2D context on the offscreen canvas
-    try {
-      offCtx = off.getContext('2d');
-    } catch (err) {
-      offCtx = null;
-      console.warn('off.getContext failed', err);
-    }
+        let width, height;
+        let lumens = 0;
+        let clickValue = 1;
+        let autoValue = 0;
+        
+        let costs = { click: 10, auto: 50 };
+        let levels = { click: 1, auto: 0 };
 
-    useOffscreen = !!offCtx && off.width > 0 && off.height > 0;
-  }
+        const blobs = [];
+        const colors = [
+            'rgba(168, 85, 247, ', // Purple
+            'rgba(236, 72, 153, ', // Pink
+            'rgba(59, 130, 246, ', // Blue
+            'rgba(34, 211, 238, ', // Cyan
+            'rgba(251, 146, 60, '  // Orange
+        ];
 
-  window.addEventListener('resize', () => { setSize(); });
-  window.addEventListener('orientationchange', () => { setSize(); });
+        class Blob {
+            constructor(x, y, size, colorBase) {
+                this.x = x;
+                this.y = y;
+                this.size = size;
+                this.colorBase = colorBase;
+                this.alpha = 0.6;
+                this.vx = (Math.random() - 0.5) * 1.5;
+                this.vy = (Math.random() - 0.5) * 1.5;
+                this.life = 1.0;
+                this.decay = 0.002 + Math.random() * 0.003;
+            }
 
-  // Data structures for blobs and click particles
-  const blobs = [];
-  const particles = [];
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.life -= this.decay;
 
-  const palette = [
-    {r:255,g:120,b:90},
-    {r:255,g:200,b:90},
-    {r:110,g:200,b:255},
-    {r:180,g:90,b:255}
-  ];
+                // Gentle bounce
+                if (this.x < 0 || this.x > width) this.vx *= -1;
+                if (this.y < 0 || this.y > height) this.vy *= -1;
+            }
 
-  function rand(min, max){ return Math.random()*(max-min)+min }
+            draw() {
+                const gradient = ctx.createRadialGradient(
+                    this.x, this.y, 0,
+                    this.x, this.y, this.size
+                );
+                const a = this.alpha * this.life;
+                gradient.addColorStop(0, this.colorBase + a + ')');
+                gradient.addColorStop(1, this.colorBase + '0)');
 
-  function spawnBlob(x,y,r, colorIdx){
-    const W = (off.width > 0 ? off.width : canvas.width);
-    const H = (off.height > 0 ? off.height : canvas.height);
-
-    blobs.push({
-      x: (typeof x === 'number') ? x : rand(0, W),
-      y: (typeof y === 'number') ? y : rand(H*0.4, H*0.9),
-      r: (typeof r === 'number') ? r : rand(40,120),
-      vx: rand(-0.3,0.3),
-      vy: rand(-0.15,-0.5),
-      color: palette[colorIdx===undefined?Math.floor(rand(0,palette.length)):colorIdx]
-    });
-  }
-
-  // safe pointer mapping (client -> canvas pixels)
-  function mapEventToCanvas(e){
-    const rect = canvas.getBoundingClientRect();
-    const localDpr = canvas.width / rect.width || dpr;
-    const x = (e.clientX - rect.left) * localDpr;
-    const y = (e.clientY - rect.top) * localDpr;
-    return {x,y};
-  }
-
-  canvas.addEventListener('pointerdown', (e) => {
-    const {x,y} = mapEventToCanvas(e);
-
-    for(let i=0;i<30;i++){
-      const angle = Math.random()*Math.PI*2;
-      const speed = rand(0.5, 6);
-      particles.push({
-        x, y,
-        vx: Math.cos(angle)*speed,
-        vy: Math.sin(angle)*speed - rand(0,2),
-        life: Math.floor(rand(40,100)),
-        age: 0,
-        r: rand(6,36),
-        color: palette[Math.floor(rand(0,palette.length))]
-      });
-    }
-
-    for(let i=0;i<3;i++) spawnBlob(x + rand(-60,60), y + rand(-60,60), rand(20,70), Math.floor(rand(0,palette.length)));
-  });
-
-  function step() {
-    for(let b of blobs){
-      b.vy -= 0.0008 * b.r;
-      b.vx += Math.sin((b.x + performance.now()*0.0003) * 0.01) * 0.02;
-      b.x += b.vx;
-      b.y += b.vy;
-      b.r += Math.sin((b.x+b.y)*0.001 + performance.now()*0.002) * 0.3;
-
-      const W = (off.width > 0 ? off.width : canvas.width);
-      const H = (off.height > 0 ? off.height : canvas.height);
-
-      if(b.x < -200) b.x = W + 100;
-      if(b.x > W + 200) b.x = -100;
-      if(b.y < -300) { b.y = H + 100; b.vy = rand(-0.3,0.3); }
-      if(b.y > H + 300) { b.y = H * 0.8; b.vy = -Math.abs(b.vy); }
-
-      b.vx *= 0.995;
-      b.vy *= 0.998;
-      b.r = Math.max(10, Math.min(b.r, 240));
-    }
-
-    for(let i = particles.length - 1; i >= 0; i--){
-      const p = particles[i];
-      p.vy += 0.06;
-      p.x += p.vx;
-      p.y += p.vy;
-      p.age++;
-      if(p.age > p.life) particles.splice(i,1);
-    }
-
-    if(blobs.length > 55) blobs.splice(0, blobs.length - 45);
-
-    if(Math.random() < 0.01) spawnBlob(rand(0, off.width || canvas.width), (off.height || canvas.height) * 0.9 + rand(-40,40), rand(30,90));
-  }
-
-  // draw onto the provided 2D context (used for offscreen and direct drawing)
-  function drawInto(ctx2d, targetWidth, targetHeight) {
-    ctx2d.clearRect(0,0,targetWidth,targetHeight);
-
-    // additive blurred blobs
-    ctx2d.globalCompositeOperation = 'lighter';
-    // use filter where available (not all browsers support ctx.filter)
-    try { ctx2d.filter = 'blur(20px)'; } catch(e) { /* ignore */ }
-
-    for(let b of blobs){
-      const g = ctx2d.createRadialGradient(b.x, b.y, Math.max(2,b.r*0.1), b.x, b.y, b.r);
-      const c = b.color;
-      g.addColorStop(0, `rgba(${c.r},${c.g},${c.b},0.95)`);
-      g.addColorStop(0.35, `rgba(${c.r},${c.g},${c.b},0.6)`);
-      g.addColorStop(0.65, `rgba(${c.r},${c.g},${c.b},0.12)`);
-      g.addColorStop(1, `rgba(12,10,12,0)`);
-      ctx2d.beginPath();
-      ctx2d.fillStyle = g;
-      ctx2d.arc(b.x, b.y, b.r, 0, Math.PI*2);
-      ctx2d.fill();
-    }
-
-    // particles layer
-    try { ctx2d.filter = 'blur(8px)'; } catch(e) {}
-    for(const p of particles){
-      const lifeProgress = 1 - p.age / p.life;
-      const alpha = Math.max(0, lifeProgress);
-      const c = p.color;
-      const grad = ctx2d.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r);
-      grad.addColorStop(0, `rgba(${c.r},${c.g},${c.b},${alpha})`);
-      grad.addColorStop(0.3, `rgba(${c.r},${c.g},${c.b},${alpha*0.6})`);
-      grad.addColorStop(1, `rgba(0,0,0,0)`);
-      ctx2d.beginPath();
-      ctx2d.fillStyle = grad;
-      ctx2d.arc(p.x, p.y, p.r, 0, Math.PI*2);
-      ctx2d.fill();
-    }
-
-    // reset filter
-    try { ctx2d.filter = 'none'; } catch(e) {}
-    ctx2d.globalCompositeOperation = 'source-over';
-  }
-
-  function draw() {
-    // clear visible canvas and draw background
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-    ctx.save();
-    ctx.fillStyle = '#050507';
-    ctx.fillRect(0,0,canvas.width,canvas.height);
-    ctx.restore();
-
-    // If we can use the offscreen canvas, draw blobs/particles into it first
-    if (useOffscreen && offCtx) {
-      drawInto(offCtx, off.width, off.height);
-
-      // draw the offscreen canvas onto the visible canvas, guarded so drawImage never
-      // receives a zero-sized canvas.
-      if (off.width > 0 && off.height > 0) {
-        try {
-          ctx.globalCompositeOperation = 'screen';
-          ctx.drawImage(off, 0, 0);
-        } catch (err) {
-          // Defensive: if drawImage still fails (rare), fall back to drawing directly.
-          console.warn('drawImage(off) failed — falling back to direct draw', err);
-          drawInto(ctx, canvas.width, canvas.height);
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
         }
-      } else {
-        // fallback if offscreen unexpectedly zero-sized
-        drawInto(ctx, canvas.width, canvas.height);
-      }
-    } else {
-      // no offscreen available: draw directly to visible canvas
-      drawInto(ctx, canvas.width, canvas.height);
-    }
 
-    // glass overlay
-    ctx.globalCompositeOperation = 'source-over';
-    const g2 = ctx.createLinearGradient(0,0,0,canvas.height);
-    g2.addColorStop(0, 'rgba(255,255,255,0.02)');
-    g2.addColorStop(0.5, 'rgba(255,255,255,0)');
-    g2.addColorStop(1, 'rgba(0,0,0,0.18)');
-    ctx.fillStyle = g2;
-    ctx.fillRect(0,0,canvas.width,canvas.height);
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
 
-    // tiny highlights
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.beginPath();
-    ctx.ellipse(canvas.width*0.18, canvas.height*0.08, canvas.width*0.06, canvas.height*0.06, 0, 0, Math.PI*2);
-    ctx.fillStyle = 'rgba(255,255,255,0.02)';
-    ctx.fill();
+        function createBlob(x, y, isAuto = false) {
+            const size = 40 + Math.random() * 60;
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            blobs.push(new Blob(x, y, size, color));
+            
+            if (!isAuto) {
+                lumens += clickValue;
+            }
+        }
 
-    ctx.globalCompositeOperation = 'source-over';
-  }
+        // --- Game Logic ---
 
-  function loop() { step(); draw(); requestAnimationFrame(loop); }
+        function updateGame() {
+            lumens += autoValue / 60;
+            currencyEl.innerText = `${Math.floor(lumens)} Lumens`;
+            lpsEl.innerText = `${autoValue.toFixed(1)} per sec`;
 
-  // --- Sanity checks / lightweight tests (runs once on init) ---
-  function runSanityChecks() {
-    const checks = [];
-    checks.push({ name: 'canvas-size', ok: canvas.width >= 1 && canvas.height >= 1, msg: `canvas ${canvas.width}x${canvas.height}` });
-    checks.push({ name: 'offscreen-size', ok: off.width >= 1 && off.height >= 1, msg: `off ${off.width}x${off.height}` });
-    checks.push({ name: 'offscreen-ctx', ok: !!offCtx, msg: `offCtx ${!!offCtx}` });
-    return checks;
-  }
+            // Auto-spawn blobs occasionally
+            if (autoValue > 0 && Math.random() < (0.02 + (autoValue * 0.001))) {
+                createBlob(Math.random() * width, Math.random() * height, true);
+            }
 
-  function showDebugIfNeeded(checks) {
-    const failed = checks.filter(c => !c.ok);
-    const debugEl = document.getElementById('debug');
-    if (failed.length) {
-      debugEl.style.display = 'block';
-      debugEl.textContent = 'Init checks failed:\n' + failed.map(f => `${f.name}: ${f.msg}`).join('\n');
-      console.warn('Sanity checks failed', failed);
-    } else {
-      debugEl.style.display = 'none';
-      console.log('Sanity checks passed');
-    }
-  }
+            // Button states
+            document.getElementById('upg-click').disabled = lumens < costs.click;
+            document.getElementById('upg-auto').disabled = lumens < costs.auto;
+        }
 
-  // Initialization: ensure sizes are set before creating blobs / starting loop
-  function init() {
-    setSize();
+        function animate() {
+            // Dark trail effect instead of clearRect for "motion blur"
+            ctx.fillStyle = 'rgba(10, 10, 12, 0.15)';
+            ctx.fillRect(0, 0, width, height);
 
-    // create initial blobs after we have sizes
-    for(let i=0;i<10;i++) spawnBlob();
-    for(let i=0;i<6;i++){
-      spawnBlob(rand(0, off.width || canvas.width), rand((off.height || canvas.height)*0.6, off.height || canvas.height), rand(80,180), i % palette.length);
-    }
+            ctx.globalCompositeOperation = 'lighter';
 
-    const checks = runSanityChecks();
-    showDebugIfNeeded(checks);
+            for (let i = blobs.length - 1; i >= 0; i--) {
+                blobs[i].update();
+                blobs[i].draw();
+                if (blobs[i].life <= 0) blobs.splice(i, 1);
+            }
 
-    // start animation loop
-    requestAnimationFrame(loop);
-  }
+            ctx.globalCompositeOperation = 'source-over';
+            
+            updateGame();
+            requestAnimationFrame(animate);
+        }
 
-  if (document.readyState === 'loading') {
-    window.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+        // --- Interaction ---
 
-})();
-</script>
+        canvas.addEventListener('mousedown', (e) => {
+            createBlob(e.clientX, e.clientY);
+        });
+
+        document.getElementById('upg-click').addEventListener('click', () => {
+            if (lumens >= costs.click) {
+                lumens -= costs.click;
+                clickValue += 1;
+                levels.click++;
+                costs.click = Math.floor(costs.click * 1.5);
+                document.getElementById('cost-click').innerText = `Cost: ${costs.click}`;
+            }
+        });
+
+        document.getElementById('upg-auto').addEventListener('click', () => {
+            if (lumens >= costs.auto) {
+                lumens -= costs.auto;
+                autoValue += 0.5;
+                levels.auto++;
+                costs.auto = Math.floor(costs.auto * 1.6);
+                document.getElementById('cost-auto').innerText = `Cost: ${costs.auto}`;
+            }
+        });
+
+        window.addEventListener('resize', resize);
+
+        // Initial setup
+        resize();
+        animate();
+    </script>
 </body>
 </html>
